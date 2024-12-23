@@ -47,7 +47,11 @@ async function run() {
         });
 
 
-
+        app.get('/fixedFoods', async (req, res) => {
+            const cursor = foodCollection.find().sort({ purchaseCount: -1 }).limit(6);
+            const result = await cursor.toArray();
+            res.send(result);
+        });
 
 
 
