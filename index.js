@@ -79,6 +79,19 @@ async function run() {
         });
 
 
+        app.get('/my-orders', async (req, res) => {
+            const email = req.query.email;
+            let query = {};
+            if (email) {
+                query = { buyerEmail: email }
+            }
+
+            const cursor = purchaseCollection.find(query);
+            const result = await cursor.toArray();
+            res.send(result);
+        });
+
+
 
         app.post('/foods', async (req, res) => {
             const newFood = req.body;
@@ -133,7 +146,13 @@ async function run() {
         });
 
 
-
+        app.delete('/my-orders/:id', async (req, res) => {
+            console.log('going to delete', req.params.id);
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) };
+            const result = await purchaseCollection.deleteOne(query);
+            res.send(result);
+        });
 
 
 
