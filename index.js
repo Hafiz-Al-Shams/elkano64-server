@@ -36,6 +36,7 @@ async function run() {
 
 
         const foodCollection = client.db('elkano64DB').collection('foods');
+        const purchaseCollection = client.db('elkano64DB').collection('purchases');
 
 
 
@@ -67,6 +68,67 @@ async function run() {
             const query = { name: { $regex: searchText, $options: 'i' } };
             const cursor = foodCollection.find(query);
             const result = await cursor.toArray();
+            res.send(result);
+        });
+
+        app.get('/foods/email/:userEmail', async (req, res) => {
+            const email = req.params.userEmail;
+            const query = { userEmail: email };
+            const result = await foodCollection.find(query).toArray();
+            res.send(result);
+        });
+
+
+
+        app.post('/foods', async (req, res) => {
+            const newFood = req.body;
+            newFood.purchaseCount = 0;
+            console.log('Adding new food', newFood);
+
+            const result = await foodCollection.insertOne(newFood);
+            res.send(result);
+        });
+
+
+        app.post('/purchases', async (req, res) => {
+            const newPurchase = req.body;
+            const date = new Date();
+            newPurchase.buyingDate = date.toLocaleString();
+            // newPurchase.buyingDate = Date.now();
+            console.log('adding new purchase', newPurchase);
+
+            const insertResult = await purchaseCollection.insertOne(newPurchase);
+            const updateResult = await foodCollection.updateOne(
+                { name: newPurchase.name },
+                { $inc: { purchaseCount: 1 } }
+            );
+
+            if (updateResult.matchedCount > 0) {
+                res.send({
+                    message: 'Purchase added and purchase count updated successfully',
+                    insertResult,
+                    updateResult
+                });
+            }
+
+            // const result = await purchaseCollection.insertOne(newPurchase);
+            // res.send(result);
+
+        });
+
+
+
+
+        app.put('/foods/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) };
+            const options = { upsert: true };
+            const updatedFood = {
+                $set: req.body
+            };
+
+            const result = await foodCollection.updateOne(filter, updatedFood, options);
+
             res.send(result);
         });
 
