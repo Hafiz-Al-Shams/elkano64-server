@@ -96,7 +96,7 @@ async function run() {
         app.post('/foods', async (req, res) => {
             const newFood = req.body;
             newFood.purchaseCount = 0;
-            console.log('Adding new food', newFood);
+            // console.log('Adding new food', newFood);
 
             const result = await foodCollection.insertOne(newFood);
             res.send(result);
@@ -108,7 +108,7 @@ async function run() {
             const date = new Date();
             newPurchase.buyingDate = date.toLocaleString();
             // newPurchase.buyingDate = Date.now();
-            console.log('adding new purchase', newPurchase);
+            // console.log('adding new purchase', newPurchase);
 
             const insertResult = await purchaseCollection.insertOne(newPurchase);
             const updateResult = await foodCollection.updateOne(
@@ -147,7 +147,7 @@ async function run() {
 
 
         app.delete('/my-orders/:id', async (req, res) => {
-            console.log('going to delete', req.params.id);
+            // console.log('going to delete', req.params.id);
             const id = req.params.id;
             const query = { _id: new ObjectId(id) };
             const result = await purchaseCollection.deleteOne(query);
