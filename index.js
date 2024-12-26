@@ -12,8 +12,6 @@ app.use(express.json());
 
 
 
-
-
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.bkfjr.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -37,7 +35,6 @@ async function run() {
 
         const foodCollection = client.db('elkano64DB').collection('foods');
         const purchaseCollection = client.db('elkano64DB').collection('purchases');
-
 
 
 
@@ -131,7 +128,6 @@ async function run() {
 
 
 
-
         app.put('/foods/:id', async (req, res) => {
             const id = req.params.id;
             const filter = { _id: new ObjectId(id) };
@@ -155,23 +151,12 @@ async function run() {
         });
 
 
-
-
-
-
-
-
-
-
     } finally {
         // Ensures that the client will close when you finish/error
         // await client.close();
     }
 }
 run().catch(console.dir);
-
-
-
 
 
 
