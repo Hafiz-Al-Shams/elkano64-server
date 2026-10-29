@@ -5,13 +5,9 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express();
 const port = process.env.PORT || 5000;
 
-
-
 // middleware
 app.use(cors());
 app.use(express.json());
-
-
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.bkfjr.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -26,18 +22,9 @@ const client = new MongoClient(uri, {
 
 async function run() {
     try {
-        // Connect the client to the server	(optional starting in v4.7)
-        // await client.connect();
-        // Send a ping to confirm a successful connection
-        // await client.db("admin").command({ ping: 1 });
-        // console.log("Pinged your deployment. You successfully connected to MongoDB!");
-        
-
-
 
         const foodCollection = client.db('elkano64DB').collection('foods');
         const purchaseCollection = client.db('elkano64DB').collection('purchases');
-
 
 
         app.get('/foods', async (req, res) => {
@@ -95,8 +82,6 @@ async function run() {
         app.post('/foods', async (req, res) => {
             const newFood = req.body;
             newFood.purchaseCount = 0;
-            // console.log('Adding new food', newFood);
-
             const result = await foodCollection.insertOne(newFood);
             res.send(result);
         });
@@ -106,8 +91,6 @@ async function run() {
             const newPurchase = req.body;
             const date = new Date();
             newPurchase.buyingDate = date.toLocaleString();
-            // newPurchase.buyingDate = Date.now();
-            // console.log('adding new purchase', newPurchase);
 
             const insertResult = await purchaseCollection.insertOne(newPurchase);
             const updateResult = await foodCollection.updateOne(
@@ -122,9 +105,6 @@ async function run() {
                     updateResult
                 });
             }
-
-            // const result = await purchaseCollection.insertOne(newPurchase);
-            // res.send(result);
 
         });
 
