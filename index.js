@@ -46,12 +46,50 @@ const numberField = (field) => ({
     $convert: { input: `$${field}`, to: 'int', onError: 0, onNull: 0 },
 });
 
+// ---------- notification helpers ----------
+// every notification is automatically deleted from the database 7 days after it was created
+const NOTIFICATION_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
+const NOTIFICATION_LIST_LIMIT = 100;
+
 async function run() {
     try {
 
         const foodCollection = client.db('elkano64DB').collection('foods');
         const purchaseCollection = client.db('elkano64DB').collection('purchases');
         const bookingCollection = client.db('elkano64DB').collection('bookings');
+        const notificationCollection = client.db('elkano64DB').collection('notifications');
+
+        // ---------- notification indexes ----------
+        // 1) TTL index: MongoDB itself deletes a notification 7 days after its createdAt
+        // 2) fast lookup of one user's newest notifications
+        // (not awaited on purpose, so the routes below are registered immediately)
+        notificationCollection
+            .createIndex({ createdAt: 1 }, { expireAfterSeconds: NOTIFICATION_LIFETIME_SECONDS })
+            .catch((error) => console.error('Notification TTL index error:', error));
+        notificationCollection
+            .createIndex({ email: 1, createdAt: -1 })
+            .catch((error) => console.error('Notification email index error:', error));
+
+        // saves one notification for one user.
+        // It NEVER throws: if saving a notification fails, the real action
+        // (order, booking, add/update/delete) still succeeds exactly as before.
+        const createNotification = async (email, type, title, text) => {
+            try {
+                const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+                if (!cleanEmail) return;
+
+                await notificationCollection.insertOne({
+                    email: cleanEmail,
+                    type,
+                    title,
+                    text,
+                    read: false,
+                    createdAt: new Date(),
+                });
+            } catch (error) {
+                console.error('createNotification error:', error);
+            }
+        };
 
 
         app.get('/foods', async (req, res) => {
@@ -129,11 +167,48 @@ async function run() {
         });
 
 
+        // ---------- GET: one user's notifications (by email) ----------
+        // example: http://localhost:5000/notifications?email=user@example.com
+        // only the last 7 days exist, older ones are removed automatically by the TTL index
+        app.get('/notifications', async (req, res) => {
+            try {
+                const email = (req.query.email || '').trim().toLowerCase();
+
+                // an email is required, so nobody can list every user's notifications
+                if (!email) {
+                    return res.status(400).send({ message: 'Email query is required. Example: /notifications?email=user@example.com' });
+                }
+
+                const result = await notificationCollection
+                    .find({ email })
+                    .sort({ createdAt: -1 }) // newest notification first
+                    .limit(NOTIFICATION_LIST_LIMIT)
+                    .toArray();
+
+                res.send(result);
+            } catch (error) {
+                console.error('GET /notifications error:', error);
+                res.status(500).send({ message: 'Failed to load notifications.' });
+            }
+        });
+
+
 
         app.post('/foods', async (req, res) => {
             const newFood = req.body;
             newFood.purchaseCount = 0;
             const result = await foodCollection.insertOne(newFood);
+
+            // notify the user who added the food
+            if (result.acknowledged) {
+                await createNotification(
+                    newFood.userEmail,
+                    'food_added',
+                    'Food Added',
+                    `You added "${newFood.name || 'a new food'}" to the menu.`
+                );
+            }
+
             res.send(result);
         });
 
@@ -200,6 +275,14 @@ async function run() {
                     throw insertError;
                 }
 
+                // 6) order saved -> notify the buyer
+                await createNotification(
+                    newPurchase.buyerEmail,
+                    'order_created',
+                    'Order Placed Successfully',
+                    `You ordered ${qty} x ${newPurchase.name || 'a food item'}.`
+                );
+
                 res.send({
                     message: 'Purchase added, available quantity and purchase count updated successfully',
                     insertResult,
@@ -262,6 +345,15 @@ async function run() {
                 };
 
                 const result = await bookingCollection.insertOne(newBooking);
+
+                // booking saved -> notify the user
+                await createNotification(
+                    cleanEmail,
+                    'booking_created',
+                    'Table Booked Successfully',
+                    `Your table for ${guestCount} ${guestCount === 1 ? 'guest' : 'guests'} on ${date} at ${time} is confirmed.`
+                );
+
                 res.status(201).send({ message: 'Table booked successfully.', insertedId: result.insertedId });
             } catch (error) {
                 console.error('POST /bookings error:', error);
@@ -279,7 +371,25 @@ async function run() {
                 $set: req.body
             };
 
+            // look the food up first, only to know its owner + name for the notification
+            let existingFood = null;
+            try {
+                existingFood = await foodCollection.findOne(filter, { projection: { userEmail: 1, name: 1 } });
+            } catch (lookupError) {
+                console.error('PUT /foods lookup error:', lookupError);
+            }
+
             const result = await foodCollection.updateOne(filter, updatedFood, options);
+
+            // food updated -> notify its owner
+            if (result.matchedCount > 0) {
+                await createNotification(
+                    (existingFood && existingFood.userEmail) || (req.body && req.body.userEmail),
+                    'food_updated',
+                    'Food Updated',
+                    `Your food "${(req.body && req.body.name) || (existingFood && existingFood.name) || 'item'}" was updated successfully.`
+                );
+            }
 
             res.send(result);
         });
@@ -289,7 +399,27 @@ async function run() {
             // console.log('going to delete', req.params.id);
             const id = req.params.id;
             const query = { _id: new ObjectId(id) };
+
+            // read the order before it disappears, only to know its buyer + food name
+            let order = null;
+            try {
+                order = await purchaseCollection.findOne(query, { projection: { buyerEmail: 1, name: 1 } });
+            } catch (lookupError) {
+                console.error('DELETE /my-orders lookup error:', lookupError);
+            }
+
             const result = await purchaseCollection.deleteOne(query);
+
+            // order deleted -> notify the buyer
+            if (result.deletedCount > 0 && order) {
+                await createNotification(
+                    order.buyerEmail,
+                    'order_deleted',
+                    'Order Deleted',
+                    `Your order for ${order.name || 'a food item'} was deleted.`
+                );
+            }
+
             res.send(result);
         });
 
@@ -308,17 +438,61 @@ async function run() {
                     return res.status(400).send({ message: 'Email query is required.' });
                 }
 
+                const bookingQuery = { _id: new ObjectId(id), email };
+
+                // read the booking before it disappears, only to describe it in the notification
+                let booking = null;
+                try {
+                    booking = await bookingCollection.findOne(bookingQuery, { projection: { date: 1, time: 1, guests: 1 } });
+                } catch (lookupError) {
+                    console.error('DELETE /bookings lookup error:', lookupError);
+                }
+
                 // both id AND email must match, so a user can only delete their own booking
-                const result = await bookingCollection.deleteOne({ _id: new ObjectId(id), email });
+                const result = await bookingCollection.deleteOne(bookingQuery);
 
                 if (result.deletedCount === 0) {
                     return res.status(404).send({ message: 'Booking not found for this user.' });
                 }
 
+                // booking deleted -> notify the user
+                await createNotification(
+                    email,
+                    'booking_deleted',
+                    'Booking Deleted',
+                    booking
+                        ? `Your table booking on ${booking.date} at ${booking.time} was deleted.`
+                        : 'Your table booking was deleted.'
+                );
+
                 res.send({ message: 'Booking deleted successfully.', deletedCount: result.deletedCount });
             } catch (error) {
                 console.error('DELETE /bookings error:', error);
                 res.status(500).send({ message: 'Failed to delete the booking.' });
+            }
+        });
+
+
+        // ---------- PATCH: mark ALL of one user's notifications as read ----------
+        // example: PATCH http://localhost:5000/notifications/read-all?email=user@example.com
+        app.patch('/notifications/read-all', async (req, res) => {
+            try {
+                const email = (req.query.email || '').trim().toLowerCase();
+
+                if (!email) {
+                    return res.status(400).send({ message: 'Email query is required.' });
+                }
+
+                // only this user's unread notifications are touched
+                const result = await notificationCollection.updateMany(
+                    { email, read: false },
+                    { $set: { read: true } }
+                );
+
+                res.send({ message: 'All notifications marked as read.', modifiedCount: result.modifiedCount });
+            } catch (error) {
+                console.error('PATCH /notifications/read-all error:', error);
+                res.status(500).send({ message: 'Failed to mark notifications as read.' });
             }
         });
 
